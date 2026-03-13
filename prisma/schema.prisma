@@ -1,0 +1,315 @@
+// Prisma Schema for XDeals - DARKPAY NEXUS Integration
+// Database: SQLite for development, PostgreSQL (Vercel/Supabase) for production
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// EVENT MANAGEMENT
+// ============================================
+
+model Event {
+  id          String       @id @default(cuid())
+  slug        String       @unique
+  name        String
+  artist      String?
+  tour        String?
+  description String?
+  
+  // Date and Location
+  date        DateTime     // Start date
+  endDate     DateTime?    // End date (for multi-day events)
+  venue       String
+  city        String
+  state       String?      // UF (PR, SP, etc.)
+  
+  // Event Classification (for filters)
+  eventType   String       @default("show")     // "show", "festival", "rodeio", "exposicao"
+  category    String       @default("musica")   // "musica", "agronegocio", "esporte", "cultura"
+  
+  // Media
+  bannerUrl   String
+  mapUrl      String?
+  youtubeVideoId String?
+  videoUrl    String?      // Direct video URL (MP4, etc.)
+  
+  // Links
+  originalLink String
+  
+  // Discount Configuration
+  discountType   String  @default("fixed") // "fixed" or "progressive"
+  fixedDiscount  Int?    @default(0) // percentage (for fixed type)
+  
+  // Status
+  isActive    Boolean      @default(true)
+  badge       String?
+  featured    Boolean      @default(false) // Destaque na homepage
+  
+  // Relations
+  ticketTypes     TicketType[]
+  orders          Order[]
+  discountPeriods DiscountPeriod[]
+  
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  
+  @@index([city])
+  @@index([state])
+  @@index([eventType])
+  @@index([category])
+  @@index([isActive])
+  @@index([featured])
+}
+
+model DiscountPeriod {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  discount    Int      // percentage
+  startDate   DateTime
+  endDate     DateTime
+  label       String
+  
+  createdAt   DateTime @default(now())
+  
+  @@index([eventId])
+}
+
+model TicketType {
+  id          String   @id @default(cuid())
+  eventId     String
+  event       Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  
+  name        String   // "Pista", "VIP", "Camarote", etc.
+  description String?
+  
+  // Pricing
+  basePrice   Float    // Price before fees
+  fee         Float    // Fee amount
+  totalPrice  Float    // basePrice + fee
+  
+  // Availability
+  quantityTotal    Int     @default(100)
+  quantitySold     Int     @default(0)
+  quantityReserved Int     @default(0)
+  maxPerOrder      Int     @default(10)
+  
+  // Features (stored as JSON string)
+  features    String?
+  
+  // Ticket Type Classification
+  ticketCategory String? @default("individual") // "individual", "passaporte", "combo"
+  
+  // Status
+  isActive    Boolean  @default(true)
+  
+  // Relations
+  orderItems  OrderItem[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([eventId])
+}
+
+// ============================================
+// ORDER MANAGEMENT
+// ============================================
+
+model Order {
+  id            String   @id @default(cuid())
+  orderId       String   @unique // XD-12345-USER-789 format
+  
+  // Event
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id])
+  
+  // Customer Info
+  customerName     String
+  customerCpf      String
+  customerContactType String  // "WhatsApp", "Email", "Telegram"
+  customerContact  String
+  
+  // Pricing
+  subtotal      Float
+  discount      Int      // percentage applied
+  discountAmount Float
+  total         Float
+  
+  // Nexus Integration
+  nexusId       String?  @unique // NX_A1B2C3D4E5F6
+  nexusStatus   String   @default("pending") // pending, PAID, expired, cancelled
+  pixCode       String?  // PIX copia e cola
+  
+  // Payment
+  paymentStatus String   @default("pending") // pending, paid, expired, cancelled
+  paidAt        DateTime?
+  expiresAt     DateTime?
+  
+  // Ticket Delivery
+  ticketsDelivered Boolean @default(false) // Whether tickets have been sent to customer
+  ticketsDeliveredAt DateTime? // When tickets were sent
+  
+  // Relations
+  items         OrderItem[]
+  tickets       Ticket[]
+  notifications PaymentNotification[]
+  auditLogs     AuditLog[]
+  notificationRecords Notification[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([eventId])
+  @@index([customerCpf])
+  @@index([nexusId])
+  @@index([paymentStatus])
+  @@index([ticketsDelivered])
+}
+
+model OrderItem {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  ticketTypeId  String
+  ticketType    TicketType @relation(fields: [ticketTypeId], references: [id])
+  
+  quantity      Int
+  unitPrice     Float
+  totalPrice    Float
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([orderId])
+  @@index([ticketTypeId])
+}
+
+// ============================================
+// TICKET MANAGEMENT
+// ============================================
+
+model Ticket {
+  id            String   @id @default(cuid())
+  orderId       String
+  order         Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  // Ticket identification
+  ticketCode    String   @unique // Unique code for entry
+  qrCodeHash    String   @unique // Hash for QR code verification
+  seatNumber    String?  // Seat number if applicable
+  
+  // Validation
+  isValidated   Boolean  @default(false)
+  validatedAt   DateTime?
+  validatedBy   String?  // ID of validator
+  
+  // Delivery
+  deliveredAt   DateTime? // When ticket was sent to customer
+  
+  // Ticket holder (can be different from buyer)
+  holderName    String?
+  holderDocument String?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([orderId])
+  @@index([ticketCode])
+  @@index([qrCodeHash])
+  @@index([deliveredAt])
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model PaymentNotification {
+  id              String   @id @default(cuid())
+  orderId         String?
+  order           Order?   @relation(fields: [orderId], references: [id])
+  
+  nexusId         String?
+  status          String
+  
+  // Raw payload from Nexus
+  rawData         String
+  
+  // Notification status
+  whatsappSent    Boolean  @default(false)
+  telegramSent    Boolean  @default(false)
+  emailSent       Boolean  @default(false)
+  
+  createdAt       DateTime @default(now())
+  
+  @@index([nexusId])
+}
+
+// ============================================
+// AUDIT LOG
+// ============================================
+
+model AuditLog {
+  id            String   @id @default(cuid())
+  action        String   // "order_created", "payment_confirmed", "ticket_validated"
+  entityType    String   // "order", "ticket", "event"
+  entityId      String
+  
+  // Details
+  details       String?  // JSON string with additional details
+  
+  // Actor
+  performedBy   String?  // User ID or system
+  
+  // Relation
+  orderId       String?
+  order         Order?   @relation(fields: [orderId], references: [id])
+  
+  createdAt     DateTime @default(now())
+  
+  @@index([entityType, entityId])
+  @@index([action])
+}
+
+// ============================================
+// NOTIFICATION TRACKING
+// ============================================
+
+model Notification {
+  id            String   @id @default(cuid())
+  
+  // Type and Channel
+  type          String   // "purchase_confirmation", "ticket_delivery", "reminder"
+  channel       String   // "whatsapp", "email", "telegram", "sms"
+  
+  // Recipient
+  recipient     String   // Phone number or email
+  
+  // Content
+  subject       String?
+  content       String
+  
+  // Status
+  status        String   @default("pending") // "pending", "sent", "failed"
+  sentAt        DateTime?
+  error         String?
+  
+  // Relation
+  orderId       String?
+  order         Order?   @relation(fields: [orderId], references: [id])
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([type])
+  @@index([channel])
+  @@index([status])
+  @@index([orderId])
+}

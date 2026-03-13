@@ -1,0 +1,28 @@
+{
+  "name": "XDeals - Ingressos com Desconto",
+  "short_name": "XDeals",
+  "description": "Compre ingressos com descontos exclusivos de 40% a 60%. Parceiro oficial Q2Ingressos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0a0a",
+  "theme_color": "#a855f7",
+  "orientation": "portrait-primary",
+  "scope": "/",
+  "lang": "pt-BR",
+  "icons": [
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "categories": ["shopping", "entertainment", "lifestyle"],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
