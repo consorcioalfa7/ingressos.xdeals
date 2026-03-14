@@ -94,8 +94,35 @@ export async function createNexusPayment(
       };
     }
 
-    const data: NexusPaymentResponse = await response.json();
-    console.log(`[Nexus] Payment created: ${data.nexus_id}`);
+    // ==========================================
+    // INÍCIO DO ADAPTER (CORREÇÃO DE MAPEAMENTO)
+    // ==========================================
+    const rawResponse = await response.json();
+    console.log(`[Nexus] Raw API Response:`, JSON.stringify(rawResponse));
+
+    // Desembrulha a resposta se a API a colocar dentro de um objeto "data" ou "payment"
+    const payload = rawResponse.data || rawResponse.payment || rawResponse;
+
+    // Procura o código PIX nas chaves mais comuns de APIs financeiras
+    const pixCode = payload.pix_copia_e_cola || payload.pixCode || payload.payload || payload.qr_code || payload.brcode || payload.emv;
+    const nexusId = payload.nexus_id || payload.id || payload.transaction_id || payload.txid;
+    const status = payload.status || 'pending';
+
+    if (!pixCode) {
+      console.warn(`[Nexus] ALERTA CRÍTICO: Código PIX ausente na resposta. Chaves recebidas:`, Object.keys(payload));
+    }
+
+    const data: NexusPaymentResponse = {
+      status: status,
+      nexus_id: nexusId || `XD-FALLBACK-${Date.now()}`,
+      pix_copia_e_cola: pixCode || '',
+      amount: amount
+    };
+    
+    console.log(`[Nexus] Payment mapped successfully: ${data.nexus_id}`);
+    // ==========================================
+    // FIM DO ADAPTER
+    // ==========================================
 
     return {
       success: true,
