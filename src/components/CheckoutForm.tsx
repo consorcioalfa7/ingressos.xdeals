@@ -10,88 +10,46 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { QRCodeSVG } from 'qrcode.react';
 import { formatCPF, validateCPF } from '@/lib/pricing';
-import { Loader2, CreditCard, CheckCircle2, XCircle, Copy, Check, PartyPopper, CalendarDays } from 'lucide-react';
-
-// ============================================
-// TYPES & SCHEMA (Email focused)
-// ============================================
-
-interface TicketType {
-  id: string;
-  name: string;
-  description: string | null;
-  basePrice: number;
-  fee: number;
-  totalPrice: number;
-  features: string[];
-}
+import { Loader2, CreditCard, CheckCircle2, CalendarDays, Copy, Check, PartyPopper } from 'lucide-react';
 
 const checkoutSchema = z.object({
-  name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
+  name: z.string().min(3, 'Nome muito curto'),
   cpf: z.string().refine((val) => validateCPF(val), { message: 'CPF inválido' }),
-  email: z.string().email('E-mail inválido para recebimento'),
+  email: z.string().email('E-mail inválido'),
 });
 
-type CheckoutFormData = z.infer<typeof checkoutSchema>;
-
-interface CheckoutFormProps {
-  eventSlug: string;
-  eventName: string;
-  selectedTicket: TicketType | null;
-  quantity: number;
-  discountPercent: number;
-  isActive: boolean;
-}
-
-// ============================================
-// HELPERS
-// ============================================
-
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value);
-}
-
-function calculatePrice(ticket: TicketType, discountPercent: number) {
-  const originalPrice = ticket.totalPrice;
-  const discountAmount = originalPrice * (discountPercent / 100);
-  const finalPrice = originalPrice - discountAmount;
-  return { originalPrice, discountAmount, finalPrice: Math.round(finalPrice * 100) / 100 };
-}
-
-// ============================================
-// COMPONENT
-// ============================================
-
-export function CheckoutForm({ eventSlug, eventName, selectedTicket, quantity, discountPercent, isActive }: CheckoutFormProps) {
+export function CheckoutForm({ eventSlug, eventName, selectedTicket, quantity, discountPercent, isActive }: any) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [isPaid, setIsPaid] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<CheckoutFormData>({
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(checkoutSchema),
   });
 
-  // 🔄 MONITORIZAÇÃO (Polling) - Só ativa quando há uma reserva criada
+  // 🔄 MONITORIZAÇÃO EM TEMPO REAL
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (result?.success && result.orderId && !isPaid) {
+      // Pergunta o status em /api/checkout (Onde o GET está definido)
       interval = setInterval(async () => {
         try {
-          const res = await fetch(`/api/notify?orderId=${result.orderId}`);
-          const data = await res.json();
-          if (data.status === 'paid') {
-            setIsPaid(true);
-            clearInterval(interval);
+          const res = await fetch(`/api/checkout?orderId=${result.orderId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'paid') {
+              setIsPaid(true);
+              clearInterval(interval);
+            }
           }
-        } catch (err) { console.error("Polling error:", err); }
+        } catch (err) { console.error("Erro ao verificar pagamento:", err); }
       }, 5000);
     }
     return () => clearInterval(interval);
   }, [result, isPaid]);
 
-  const onSubmit = async (data: CheckoutFormData) => {
-    if (!selectedTicket) return;
+  const onSubmit = async (data: any) => {
     setIsSubmitting(true);
     setResult(null);
     try {
@@ -99,112 +57,78 @@ export function CheckoutForm({ eventSlug, eventName, selectedTicket, quantity, d
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...data,
+          name: data.name,
+          cpf: data.cpf,
           contactType: 'Email',
-          contactValue: data.email,
+          contactValue: data.email, // Mapeado corretamente para o backend
           eventSlug,
           ticketId: selectedTicket.id,
           quantity,
           discountPercent,
         }),
       });
-      const resData = await response.json();
-      setResult(resData);
+      const res = await response.json();
+      setResult(res);
     } catch {
-      setResult({ success: false, error: 'Erro ao processar reserva.' });
+      setResult({ success: false, error: 'Erro ao conectar ao servidor' });
     } finally { setIsSubmitting(false); }
   };
 
-  if (!selectedTicket) return null;
-
-  const pricing = calculatePrice(selectedTicket, discountPercent);
-  const total = pricing.finalPrice * quantity;
-
-  // TELA 1: SUCESSO (PÓS-PAGAMENTO)
+  // TELA DE SUCESSO
   if (isPaid) {
     return (
       <Card className="bg-gray-900/50 border-green-500/50">
         <CardContent className="py-12 text-center space-y-6">
-          <div className="relative inline-block">
-            <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
-            <PartyPopper className="w-8 h-8 text-yellow-400 absolute -top-2 -right-2 animate-bounce" />
+          <CheckCircle2 className="w-20 h-20 text-green-500 mx-auto" />
+          <h2 className="text-2xl font-bold text-white uppercase">Pagamento Confirmado!</h2>
+          <div className="bg-zinc-800 p-6 rounded-xl text-left border border-zinc-700 flex gap-4">
+            <CalendarDays className="w-6 h-6 text-purple-400 shrink-0" />
+            <p className="text-sm text-gray-200">Ingressos serão enviados por e-mail até 72h antes do evento.</p>
           </div>
-          <h2 className="text-2xl font-bold text-white uppercase">Pagamento Realizado!</h2>
-          <div className="bg-zinc-800 p-6 rounded-xl text-left border border-zinc-700">
-            <div className="flex gap-4">
-              <CalendarDays className="w-6 h-6 text-purple-400 shrink-0" />
-              <p className="text-sm text-gray-200">
-                🚀 <strong>Ingressos Garantidos!</strong> Seus QR Codes serão enviados para o seu e-mail cadastrado em até <strong>72 horas antes</strong> do evento.
-              </p>
-            </div>
-          </div>
-          <Button onClick={() => window.location.href = '/'} className="w-full bg-white text-black font-bold py-6">Voltar ao Início</Button>
+          <Button onClick={() => window.location.href = '/'} className="w-full bg-white text-black font-bold py-6">Voltar</Button>
         </CardContent>
       </Card>
     );
   }
 
-  // TELA 2: QR CODE (AGUARDANDO PAGAMENTO)
-  if (result?.success) {
+  // TELA DO QR CODE
+  if (result?.success && result.pixCode) {
     return (
-      <Card className="bg-gray-900/50 border-gray-700">
-        <CardContent className="py-8 text-center">
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <Loader2 className="w-4 h-4 text-purple-400 animate-spin" />
-            <span className="text-xs font-bold text-purple-400 uppercase tracking-widest">Aguardando PIX...</span>
-          </div>
-          <div className="inline-block p-4 bg-white rounded-xl mb-6 shadow-2xl">
-            <QRCodeSVG value={result.pixCode} size={200} />
-          </div>
-          <div className="space-y-4 max-w-sm mx-auto">
-            <Button onClick={() => { navigator.clipboard.writeText(result.pixCode); setCopied(true); setTimeout(() => setCopied(false), 2000); }} 
-                    className="w-full bg-zinc-800 border border-zinc-700">
-              {copied ? 'Copiado!' : 'Copiar Código PIX'}
-            </Button>
-            <div className="p-3 bg-zinc-900 rounded text-left text-[10px] text-gray-500 font-mono flex justify-between">
-              <span>ORDER ID: {result.orderId}</span>
-              <span className="text-purple-500 font-bold">VALOR: {formatCurrency(total)}</span>
-            </div>
-          </div>
-        </CardContent>
+      <Card className="bg-gray-900/50 border-gray-700 text-center py-8">
+        <Loader2 className="w-5 h-5 text-purple-400 animate-spin mx-auto mb-4" />
+        <h3 className="text-white font-bold mb-4">Reserva Criada!</h3>
+        <div className="bg-white p-4 inline-block rounded-xl mb-6 shadow-2xl">
+          <QRCodeSVG value={result.pixCode} size={200} />
+        </div>
+        <div className="px-6 space-y-4">
+          <Button onClick={() => { navigator.clipboard.writeText(result.pixCode); setCopied(true); }} className="w-full bg-zinc-800">
+            {copied ? 'Copiado!' : 'Copiar Código PIX'}
+          </Button>
+          <p className="text-[10px] text-gray-500 font-mono">ID: {result.orderId}</p>
+        </div>
       </Card>
     );
   }
 
-  // TELA 3: FORMULÁRIO DE COMPRA
+  // FORMULÁRIO
   return (
     <Card className="bg-gray-900/50 border-gray-700">
-      <CardHeader>
-        <CardTitle className="text-white flex items-center gap-2">
-          <CreditCard className="w-5 h-5 text-purple-400" /> Finalizar Compra
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        {/* Resumo do Pedido Original */}
-        <div className="mb-6 p-4 bg-gray-800/50 rounded-lg space-y-1 text-sm">
-          <div className="flex justify-between text-gray-400"><span>{eventName}</span></div>
-          <div className="flex justify-between text-white font-bold"><span>{selectedTicket.name}</span><span>x{quantity}</span></div>
-          <div className="flex justify-between font-bold text-lg pt-2 border-t border-gray-700 text-purple-400"><span>Total</span><span>{formatCurrency(total)}</span></div>
-        </div>
-
+      <CardContent className="pt-6">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
             <Label className="text-gray-300">Nome Completo</Label>
-            <Input {...register('name')} placeholder="Seu nome completo" className="bg-gray-800 border-gray-700 text-white" />
-            {errors.name && <p className="text-xs text-red-400">{errors.name.message}</p>}
+            <Input {...register('name')} className="bg-gray-800 border-gray-700 text-white" />
           </div>
           <div className="space-y-2">
             <Label className="text-gray-300">CPF</Label>
-            <Input {...register('cpf')} onChange={(e) => setValue('cpf', formatCPF(e.target.value))} placeholder="000.000.000-00" maxLength={14} className="bg-gray-800 border-gray-700 text-white" />
-            {errors.cpf && <p className="text-xs text-red-400">{errors.cpf.message}</p>}
+            <Input {...register('cpf')} onChange={(e) => setValue('cpf', formatCPF(e.target.value))} maxLength={14} className="bg-gray-800 border-gray-700 text-white" />
           </div>
           <div className="space-y-2">
             <Label className="text-gray-300">E-mail para Recebimento</Label>
             <Input {...register('email')} placeholder="seu@email.com" className="bg-gray-800 border-gray-700 text-white" />
-            {errors.email && <p className="text-xs text-red-400">{errors.email.message}</p>}
           </div>
-          <Button type="submit" disabled={isSubmitting || !isActive} className="w-full bg-gradient-to-r from-purple-500 to-blue-500 font-bold py-6 text-lg">
-            {isSubmitting ? 'Gerando Reserva...' : `Pagar ${formatCurrency(total)} via PIX`}
+          <Button type="submit" disabled={isSubmitting} className="w-full bg-gradient-to-r from-purple-500 to-blue-500 font-bold py-6">
+            {isSubmitting ? 'Gerando PIX...' : 'Pagar via PIX'}
           </Button>
         </form>
       </CardContent>
