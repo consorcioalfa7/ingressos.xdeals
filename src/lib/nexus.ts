@@ -38,9 +38,13 @@ export async function createNexusPayment(
     if (!amount || amount <= 0) return { success: false, error: 'Invalid amount' };
     if (!orderId) return { success: false, error: 'Order ID is required' };
 
-    console.log(`[Nexus] Creating payment for order ${orderId} at ${NEXUS_API_URL}/v1/payments/create`);
+    // ==========================================
+    // INJEÇÃO DE DIAGNÓSTICO (URL FANTASMA)
+    // ==========================================
+    const targetUrl = `${NEXUS_API_URL}/v1/payments/create`;
+    console.log(`[Nexus ALERTA] A tentar chamar a URL: ${targetUrl}`);
 
-    const response = await fetch(`${NEXUS_API_URL}/v1/payments/create`, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -85,7 +89,8 @@ export async function createNexusPayment(
 
 export async function checkNexusTransactionStatus(nexusId: string): Promise<{ success: boolean; data?: NexusTransactionStatus; error?: string; }> {
   try {
-    const response = await fetch(`${NEXUS_API_URL}/v1/payments/${nexusId}`, {
+    const targetUrl = `${NEXUS_API_URL}/v1/payments/${nexusId}`;
+    const response = await fetch(targetUrl, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json', 'x-api-key': NEXUS_API_KEY },
     });
