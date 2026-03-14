@@ -4,7 +4,7 @@
 import { db } from './db';
 import { Resend } from 'resend';
 
-// Inicializa o Resend (Garante que a variável RESEND_API_KEY está no teu .env ou Vercel)
+// Inicializa o Resend
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // ============================================
@@ -51,7 +51,6 @@ export async function sendPurchaseConfirmation(data: PurchaseConfirmationData): 
   try {
     console.log('[Notification] Sending purchase confirmation:', data.orderId);
 
-    // Format the event date
     const eventDateFormatted = new Date(data.eventDate).toLocaleDateString('pt-BR', {
       weekday: 'long',
       day: 'numeric',
@@ -61,7 +60,6 @@ export async function sendPurchaseConfirmation(data: PurchaseConfirmationData): 
       minute: '2-digit',
     });
 
-    // WhatsApp message (Mantido para logs/futura integração)
     const whatsappMessage = `
 🎫 *CONFIRMAÇÃO DE COMPRA - XDeals*
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -89,7 +87,6 @@ Seus ingressos serão enviados até 72 horas antes do evento para este WhatsApp 
 _Obrigado por comprar no XDeals!_
 `.trim();
 
-    // Email subject and body
     const emailSubject = `✅ Confirmação de Compra - ${data.eventName} | XDeals`;
     const emailBody = generateConfirmationEmail(data, eventDateFormatted);
 
@@ -104,22 +101,27 @@ _Obrigado por comprar no XDeals!_
       if (error) console.error('[Resend Error]', error);
     }
 
-    // Log for reference
     console.log('[Notification] Email subject:', emailSubject);
-    console.log('[Notification] WhatsApp text prepared for order:', data.orderId);
 
-    // Create notification record
-    await db.notification.create({
-      data: {
-        type: 'purchase_confirmation',
-        channel: 'email',
-        recipient: data.customerEmail || '',
-        subject: emailSubject,
-        content: whatsappMessage, // Guardamos o texto do WA como referência no log
-        status: 'sent',
-        orderId: data.orderId,
-      },
+    // 🛡️ CORREÇÃO P2003: Obter o UUID Interno primeiro
+    const dbOrder = await db.order.findUnique({
+      where: { orderId: data.orderId },
+      select: { id: true }
     });
+
+    if (dbOrder) {
+      await db.notification.create({
+        data: {
+          type: 'purchase_confirmation',
+          channel: 'email',
+          recipient: data.customerEmail || '',
+          subject: emailSubject,
+          content: whatsappMessage,
+          status: 'sent',
+          orderId: dbOrder.id, // ✅ AGORA USAMOS O UUID CORRETO DO BANCO!
+        },
+      });
+    }
 
     return true;
   } catch (error) {
@@ -174,17 +176,25 @@ ${ticketListText}
       });
     }
 
-    await db.notification.create({
-      data: {
-        type: 'ticket_delivery',
-        channel: 'email',
-        recipient: data.customerEmail || '',
-        subject: emailSubject,
-        content: whatsappMessage,
-        status: 'sent',
-        orderId: data.orderId,
-      },
+    // 🛡️ CORREÇÃO P2003: Obter o UUID Interno primeiro
+    const dbOrder = await db.order.findUnique({
+      where: { orderId: data.orderId },
+      select: { id: true }
     });
+
+    if (dbOrder) {
+      await db.notification.create({
+        data: {
+          type: 'ticket_delivery',
+          channel: 'email',
+          recipient: data.customerEmail || '',
+          subject: emailSubject,
+          content: whatsappMessage,
+          status: 'sent',
+          orderId: dbOrder.id, // ✅ UUID CORRETO
+        },
+      });
+    }
 
     for (const ticket of data.tickets) {
       await db.ticket.updateMany({
@@ -270,6 +280,9 @@ export async function processScheduledTicketDeliveries(): Promise<number> {
 // ============================================
 
 function generateConfirmationEmail(data: PurchaseConfirmationData, eventDateFormatted: string): string {
+  // Gera um QR Code com o OrderID para o email (via API pública do QuickChart)
+  const qrCodeUrl = `https://quickchart.io/qr?text=${encodeURIComponent(data.orderId)}&size=200&margin=2`;
+
   return `
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -278,29 +291,48 @@ function generateConfirmationEmail(data: PurchaseConfirmationData, eventDateForm
   <title>Confirmação de Compra - XDeals</title>
 </head>
 <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #0a0a0a; color: #ffffff;">
+  
   <div style="text-align: center; margin-bottom: 30px;">
-    <h1 style="color: #a855f7; font-size: 28px;">XDeals</h1>
-    <p style="color: #9ca3af;">Ingressos com até 60% de desconto</p>
+    <h1 style="color: #a855f7; font-size: 32px; margin-bottom: 5px;">XDeals</h1>
+    <p style="color: #9ca3af; font-size: 16px; margin-top: 0;">Sua reserva está garantida!</p>
   </div>
 
   <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border-radius: 16px; padding: 30px; margin-bottom: 20px; border: 1px solid #a855f7;">
-    <h2 style="color: #22c55e; text-align: center; margin-bottom: 20px;">✅ Compra Confirmada!</h2>
-    <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-bottom: 20px;">
-      <h3 style="color: #a855f7; margin-top: 0;">${data.eventName}</h3>
+    <h2 style="color: #22c55e; text-align: center; margin-bottom: 20px;">✅ Pagamento Confirmado!</h2>
+    
+    <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+      <h3 style="color: #a855f7; margin-top: 0; font-size: 20px;">${data.eventName}</h3>
       <p style="margin: 10px 0; color: #e5e7eb;">📅 ${eventDateFormatted}</p>
       <p style="margin: 10px 0; color: #e5e7eb;">📍 ${data.eventVenue} - ${data.eventCity}</p>
     </div>
+
+    <div style="text-align: center; margin: 30px 0; padding: 20px; background: rgba(0,0,0,0.3); border-radius: 12px;">
+      <p style="color: #9ca3af; font-size: 14px; margin-bottom: 15px;">Apresente o QR Code da reserva se necessário:</p>
+      <img src="${qrCodeUrl}" alt="QR Code da Reserva" style="border-radius: 8px; border: 4px solid #a855f7; padding: 5px; background: white; width: 150px; height: 150px;" />
+      <p style="color: #ffffff; font-family: monospace; font-size: 18px; margin-top: 15px; font-weight: bold; letter-spacing: 1px;">${data.orderId}</p>
+    </div>
+
+    <div style="display: flex; justify-content: space-between; padding: 15px 0; border-top: 1px solid rgba(255,255,255,0.1);">
+      <span style="color: #9ca3af;">Ingresso:</span>
+      <span style="color: #ffffff; font-weight: bold;">${data.ticketType} (x${data.quantity})</span>
+    </div>
     <div style="display: flex; justify-content: space-between; padding: 15px 0; border-top: 1px solid rgba(255,255,255,0.1);">
       <span style="color: #9ca3af;">Total Pago:</span>
-      <span style="color: #ffffff; font-size: 20px; font-weight: bold;">${formatCurrency(data.total)}</span>
+      <span style="color: #22c55e; font-size: 22px; font-weight: bold;">${formatCurrency(data.total)}</span>
     </div>
-    <p style="text-align: center; margin-top: 20px; color: #9ca3af; font-size: 12px;">Order ID: ${data.orderId}</p>
   </div>
 
-  <div style="background: rgba(59, 130, 246, 0.1); border-radius: 12px; padding: 20px; border: 1px solid rgba(59, 130, 246, 0.3);">
-    <h4 style="color: #3b82f6; margin-top: 0;">📧 Importante</h4>
-    <p style="color: #e5e7eb; font-size: 14px;">Seus ingressos serão enviados até <strong>72 horas antes do evento</strong> para este e-mail.</p>
+  <div style="background: rgba(59, 130, 246, 0.1); border-radius: 12px; padding: 25px; border: 1px solid rgba(59, 130, 246, 0.4); text-align: center;">
+    <h4 style="color: #3b82f6; margin-top: 0; font-size: 18px;">⚠️ ATENÇÃO - ENTREGA DE INGRESSOS</h4>
+    <p style="color: #e5e7eb; font-size: 15px; line-height: 1.6; margin-bottom: 0;">
+      Este é o seu comprovante de pagamento e reserva.<br><br>
+      Por medidas de segurança e combate à fraude, os seus <strong>ingressos definitivos</strong> (com o QR Code oficial de entrada) serão enviados para este e-mail entre <strong>48 a 72 horas antes do evento</strong>.
+    </p>
   </div>
+  
+  <p style="text-align: center; margin-top: 30px; color: #6b7280; font-size: 12px;">
+    Equipe XDeals • ingressos.xdeals.online
+  </p>
 </body>
 </html>
 `.trim();
