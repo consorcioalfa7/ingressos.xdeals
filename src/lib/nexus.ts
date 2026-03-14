@@ -3,37 +3,26 @@
 
 import { createHash, randomBytes } from 'crypto';
 
-// Nexus API Configuration (Production HTTPS)
-const NEXUS_API_URL = process.env.NEXUS_API_URL || 'https://api.dark.lat';
-const NEXUS_API_KEY = process.env.NEXUS_API_KEY || 'dk_live_xdeals_777';
-
-// Headers for Nexus API
-const NEXUS_HEADERS = {
-  'Content-Type': 'application/json',
-  'x-api-key': NEXUS_API_KEY,
+/**
+ * 🛡️ BLINDAGEM DE URL
+ * Remove barras finais e garante que o /v1 não seja duplicado
+ */
+const getBaseUrl = () => {
+  const url = process.env.NEXUS_API_URL || 'https://api.dark.lat';
+  return url.replace(/\/$/, ''); // Remove barra no fim
 };
+
+const NEXUS_API_KEY = process.env.NEXUS_API_KEY || 'dk_live_xdeals_777';
 
 // ============================================
 // TYPES
 // ============================================
-
-export interface NexusPaymentRequest {
-  amount: number;
-  order_id: string;
-}
 
 export interface NexusPaymentResponse {
   status: 'pending' | 'PAID' | 'expired' | 'cancelled';
   nexus_id: string;
   pix_copia_e_cola: string;
   amount: number;
-}
-
-export interface NexusWebhookPayload {
-  nexus_id: string;
-  order_id: string;
-  status: 'PAID' | 'expired' | 'cancelled';
-  amount_paid: number;
 }
 
 export interface NexusTransactionStatus {
@@ -49,38 +38,30 @@ export interface NexusTransactionStatus {
 // NEXUS CLIENT
 // ============================================
 
-/**
- * Create a new payment transaction in Nexus
- * IMPORTANT: This must be called from server-side only
- */
 export async function createNexusPayment(
   amount: number,
   orderId: string
-): Promise<{
-  success: boolean;
-  data?: NexusPaymentResponse;
-  error?: string;
-}> {
+): Promise<{ success: boolean; data?: NexusPaymentResponse; error?: string }> {
   try {
-    // Validate inputs
-    if (!amount || amount <= 0) {
-      return { success: false, error: 'Invalid amount' };
+    if (!amount || amount <= 0 || !orderId) {
+      return { success: false, error: 'Parâmetros inválidos para pagamento' };
     }
 
-    if (!orderId) {
-      return { success: false, error: 'Order ID is required' };
-    }
+    const baseUrl = getBaseUrl();
+    // 🛡️ Se o baseUrl já termina em /v1, não adicionamos novamente
+    const endpoint = baseUrl.endsWith('/v1') ? '/payments/create' : '/v1/payments/create';
+    const targetUrl = `${baseUrl}${endpoint}`;
 
-    console.log(`[Nexus] Creating payment for order ${orderId}, amount: ${amount}`);
+    console.log(`[Nexus] Chamando: ${targetUrl} para Ordem: ${orderId}`);
 
-    const response = await fetch(`${NEXUS_API_URL}/v1/payments/create`, {
+    const response = await fetch(targetUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': NEXUS_API_KEY,
       },
       body: JSON.stringify({
-        amount: Math.round(amount * 100) / 100, // Ensure 2 decimal places
+        amount: Math.round(amount * 100) / 100,
         order_id: orderId,
       }),
     });
@@ -88,67 +69,45 @@ export async function createNexusPayment(
     if (!response.ok) {
       const errorText = await response.text();
       console.error(`[Nexus] API error: ${response.status} - ${errorText}`);
-      return {
-        success: false,
-        error: `Nexus API error: ${response.status}`,
-      };
+      return { success: false, error: `Nexus Gateway Error: ${response.status}` };
     }
 
-    // ==========================================
-    // INÍCIO DO ADAPTER (CORREÇÃO DE MAPEAMENTO)
-    // ==========================================
     const rawResponse = await response.json();
-    console.log(`[Nexus] Raw API Response:`, JSON.stringify(rawResponse));
-
-    // Desembrulha a resposta se a API a colocar dentro de um objeto "data" ou "payment"
     const payload = rawResponse.data || rawResponse.payment || rawResponse;
 
-    // Procura o código PIX nas chaves mais comuns de APIs financeiras
-    const pixCode = payload.pix_copia_e_cola || payload.pixCode || payload.payload || payload.qr_code || payload.brcode || payload.emv;
+    // Adaptador de campos (suporte a múltiplas versões da API)
+    const pixCode = payload.pix_copia_e_cola || payload.pixCode || payload.payload || payload.qr_code || payload.brcode;
     const nexusId = payload.nexus_id || payload.id || payload.transaction_id || payload.txid;
-    const status = payload.status || 'pending';
 
     if (!pixCode) {
-      console.warn(`[Nexus] ALERTA CRÍTICO: Código PIX ausente na resposta. Chaves recebidas:`, Object.keys(payload));
+      console.error('[Nexus] Resposta sem código PIX:', payload);
+      return { success: false, error: 'Resposta do Gateway sem QR Code' };
     }
-
-    const data: NexusPaymentResponse = {
-      status: status,
-      nexus_id: nexusId || `XD-FALLBACK-${Date.now()}`,
-      pix_copia_e_cola: pixCode || '',
-      amount: amount
-    };
-    
-    console.log(`[Nexus] Payment mapped successfully: ${data.nexus_id}`);
-    // ==========================================
-    // FIM DO ADAPTER
-    // ==========================================
 
     return {
       success: true,
-      data,
+      data: {
+        status: payload.status || 'pending',
+        nexus_id: nexusId || `NX-${Date.now()}`,
+        pix_copia_e_cola: pixCode,
+        amount: amount
+      },
     };
   } catch (error) {
-    console.error('[Nexus] Failed to create payment:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    console.error('[Nexus] Falha de conexão:', error);
+    return { success: false, error: 'Não foi possível conectar ao Nexus' };
   }
 }
 
 /**
  * Check the status of a transaction in Nexus
  */
-export async function checkNexusTransactionStatus(
-  nexusId: string
-): Promise<{
-  success: boolean;
-  data?: NexusTransactionStatus;
-  error?: string;
-}> {
+export async function checkNexusTransactionStatus(nexusId: string): Promise<any> {
   try {
-    const response = await fetch(`${NEXUS_API_URL}/v1/payments/${nexusId}`, {
+    const baseUrl = getBaseUrl();
+    const endpoint = baseUrl.endsWith('/v1') ? `/payments/${nexusId}` : `/v1/payments/${nexusId}`;
+    
+    const response = await fetch(`${baseUrl}${endpoint}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -156,99 +115,34 @@ export async function checkNexusTransactionStatus(
       },
     });
 
-    if (!response.ok) {
-      return {
-        success: false,
-        error: `Nexus API error: ${response.status}`,
-      };
-    }
-
-    const data: NexusTransactionStatus = await response.json();
-
-    return {
-      success: true,
-      data,
-    };
+    if (!response.ok) return { success: false, error: `Error: ${response.status}` };
+    const data = await response.json();
+    return { success: true, data };
   } catch (error) {
-    console.error('[Nexus] Failed to check transaction:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
+    return { success: false, error: 'Connection failed' };
   }
 }
 
 // ============================================
-// ORDER ID GENERATION
+// HELPERS (ORDEM E CÓDIGOS)
 // ============================================
 
-/**
- * Generate a unique order ID in format: XD-XXXXX-USER-XXXXX
- */
 export function generateOrderId(): string {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = randomBytes(4).toString('hex').toUpperCase();
   return `XD-${timestamp.slice(-5)}-USER-${random}`;
 }
 
-/**
- * Generate a unique ticket code
- */
 export function generateTicketCode(): string {
   const timestamp = Date.now().toString(36).toUpperCase();
   const random = randomBytes(6).toString('hex').toUpperCase();
   return `TKT-${timestamp.slice(-6)}-${random}`;
 }
 
-/**
- * Generate QR code hash for ticket validation
- */
 export function generateQrCodeHash(ticketCode: string, orderId: string): string {
   const secret = process.env.QR_SECRET || 'xdeals-secret-key';
-  const data = `${ticketCode}:${orderId}:${Date.now()}`;
-  return createHash('sha256')
-    .update(data + secret)
-    .digest('hex')
-    .substring(0, 16)
-    .toUpperCase();
+  return createHash('sha256').update(`${ticketCode}:${orderId}:${secret}`).digest('hex').substring(0, 16).toUpperCase();
 }
-
-// ============================================
-// VALIDATION
-// ============================================
-
-/**
- * Validate Nexus webhook signature (if implemented)
- */
-export function validateNexusWebhook(
-  payload: string,
-  signature: string
-): boolean {
-  // TODO: Implement signature validation when Nexus provides it
-  // For now, we trust requests from the Nexus server
-  return true;
-}
-
-/**
- * Check if the Nexus API is available
- */
-export async function checkNexusHealth(): Promise<boolean> {
-  try {
-    const response = await fetch(`${NEXUS_API_URL}/health`, {
-      method: 'GET',
-      headers: {
-        'x-api-key': NEXUS_API_KEY,
-      },
-    });
-    return response.ok;
-  } catch {
-    return false;
-  }
-}
-
-// ============================================
-// EXPORTS
-// ============================================
 
 export const NexusClient = {
   createPayment: createNexusPayment,
@@ -256,8 +150,6 @@ export const NexusClient = {
   generateOrderId,
   generateTicketCode,
   generateQrCodeHash,
-  validateWebhook: validateNexusWebhook,
-  checkHealth: checkNexusHealth,
 };
 
 export default NexusClient;
