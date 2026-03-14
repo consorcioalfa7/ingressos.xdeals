@@ -4,30 +4,17 @@
 import { createHash, randomBytes } from 'crypto';
 
 // Nexus API Configuration (Production HTTPS)
-const NEXUS_API_URL = process.env.NEXUS_API_URL || 'https://api.dark.lat';
+// 🛡️ CORREÇÃO CRÍTICA: Remove barras finais da variável de ambiente para evitar o erro 404 Not Found do FastAPI
+const rawUrl = process.env.NEXUS_API_URL || 'https://api.dark.lat';
+const NEXUS_API_URL = rawUrl.replace(/\/+$/, ''); 
+
 const NEXUS_API_KEY = process.env.NEXUS_API_KEY || 'dk_live_xdeals_777';
-
-// ============================================
-// TYPES
-// ============================================
-
-export interface NexusPaymentRequest {
-  amount: number;
-  order_id: string;
-}
 
 export interface NexusPaymentResponse {
   status: 'pending' | 'PAID' | 'expired' | 'cancelled';
   nexus_id: string;
   pix_copia_e_cola: string;
   amount: number;
-}
-
-export interface NexusWebhookPayload {
-  nexus_id: string;
-  order_id: string;
-  status: 'PAID' | 'expired' | 'cancelled';
-  amount_paid: number;
 }
 
 export interface NexusTransactionStatus {
@@ -38,10 +25,6 @@ export interface NexusTransactionStatus {
   created_at: string;
   paid_at?: string;
 }
-
-// ============================================
-// NEXUS CLIENT
-// ============================================
 
 export async function createNexusPayment(
   amount: number,
@@ -55,7 +38,7 @@ export async function createNexusPayment(
     if (!amount || amount <= 0) return { success: false, error: 'Invalid amount' };
     if (!orderId) return { success: false, error: 'Order ID is required' };
 
-    console.log(`[Nexus] Creating payment for order ${orderId}, amount: ${amount}`);
+    console.log(`[Nexus] Creating payment for order ${orderId} at ${NEXUS_API_URL}/v1/payments/create`);
 
     const response = await fetch(`${NEXUS_API_URL}/v1/payments/create`, {
       method: 'POST',
@@ -76,15 +59,14 @@ export async function createNexusPayment(
     }
 
     const rawResponse = await response.json();
-    console.log(`[Nexus] Raw API Response:`, JSON.stringify(rawResponse));
-
     const payload = rawResponse.data || rawResponse.payment || rawResponse;
+
     const pixCode = payload.pix_copia_e_cola || payload.pixCode || payload.payload || payload.qr_code || payload.brcode || payload.emv;
     const nexusId = payload.nexus_id || payload.id || payload.transaction_id || payload.txid;
     const status = payload.status || 'pending';
 
     if (!pixCode) {
-      console.warn(`[Nexus] ALERTA CRÍTICO: Código PIX ausente na resposta. Chaves recebidas:`, Object.keys(payload));
+      console.warn(`[Nexus] ALERTA CRÍTICO: Código PIX ausente na resposta.`);
     }
 
     const data: NexusPaymentResponse = {
@@ -94,8 +76,6 @@ export async function createNexusPayment(
       amount: amount
     };
     
-    console.log(`[Nexus] Payment mapped successfully: ${data.nexus_id}`);
-
     return { success: true, data };
   } catch (error) {
     console.error('[Nexus] Failed to create payment:', error);

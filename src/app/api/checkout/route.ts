@@ -26,31 +26,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'CPF inválido' }, { status: 400 });
     }
 
+    if (body.quantity < 1 || body.quantity > 10) {
+      return NextResponse.json({ success: false, error: 'Quantidade deve ser entre 1 e 10' }, { status: 400 });
+    }
+
     const event = await db.event.findUnique({
       where: { slug: body.eventSlug },
       include: { ticketTypes: { where: { id: body.ticketId } } },
     });
 
-    if (!event || !event.ticketTypes[0]) {
-      return NextResponse.json({ success: false, error: 'Evento não encontrado' }, { status: 404 });
-    }
+    if (!event) return NextResponse.json({ success: false, error: 'Evento não encontrado' }, { status: 404 });
 
     const ticketType = event.ticketTypes[0];
+    if (!ticketType) return NextResponse.json({ success: false, error: 'Tipo de ingresso não encontrado' }, { status: 404 });
+
+    const available = ticketType.quantityTotal - ticketType.quantitySold - ticketType.quantityReserved;
+    if (available < body.quantity) {
+      return NextResponse.json({ success: false, error: `Apenas ${available} ingressos disponíveis` }, { status: 400 });
+    }
+
     const subtotal = ticketType.totalPrice * body.quantity;
-    
     let discountPercent = event.fixedDiscount || 0;
+    
     const now = new Date();
     const activeDiscountPeriod = await db.discountPeriod.findFirst({
       where: { eventId: event.id, startDate: { lte: now }, endDate: { gte: now } },
       orderBy: { discount: 'desc' },
     });
 
-    if (activeDiscountPeriod) {
-      discountPercent = activeDiscountPeriod.discount;
-    }
+    if (activeDiscountPeriod) discountPercent = activeDiscountPeriod.discount;
 
     const discountAmount = subtotal * (discountPercent / 100);
     const total = subtotal - discountAmount;
+
     const orderId = NexusClient.generateOrderId();
 
     const order = await db.order.create({
