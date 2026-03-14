@@ -6,6 +6,8 @@ import { db } from '@/lib/db';
 import { Sparkles, Ticket, Shield, Zap, ExternalLink, MapPin, Music, Calendar, Filter } from 'lucide-react';
 import { HomePageClient } from './HomePageClient';
 
+export const dynamic = 'force-dynamic';
+
 export const metadata: Metadata = {
   title: 'XDeals - Ingressos com até 60% de Desconto | Parceiro Q2Ingressos',
   description: 'Compre ingressos com descontos exclusivos de 40% a 60%. XDeals é parceiro oficial Q2Ingressos. Shows, festivais e eventos em todo Brasil.',
