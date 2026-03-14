@@ -2,6 +2,8 @@ import { notFound } from 'next/navigation';
 import EventPageClient from './EventPageClient';
 import { db } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 // ============================================
 // GENERATE STATIC PARAMS
 // ============================================
